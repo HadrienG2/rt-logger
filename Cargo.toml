@@ -9,3 +9,9 @@ edition = "2018"
 [dependencies]
 log = "0.4"
 abomonation = { path = "../abomonation" }
+
+[dev-dependencies]
+quickcheck = "0.9"
+quickcheck_derive = "0.2"
+quickcheck_macros = "0.8"
+rand = "0.7"

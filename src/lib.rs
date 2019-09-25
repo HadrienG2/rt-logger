@@ -1,5 +1,9 @@
+use abomonation::Abomonation;
 #[allow(deprecated)]
-use abomonation::{Abomonation, unsafe_abomonate};
+use abomonation::unsafe_abomonate;
+
+#[cfg(test)]
+use quickcheck_derive::Arbitrary;
 
 use std::{
     fmt,
@@ -8,7 +12,8 @@ use std::{
 
 
 // Mirrors log::Level, must be kept in sync with it
-#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Arbitrary))]
+#[derive(Clone, Copy, Debug)]
 enum Level {
     Error,
     Warn,
@@ -155,16 +160,73 @@ pub unsafe fn decode_and_process_log<'a, R>(
 // Report the number of bytes required to encode a log::Record
 pub fn measure_log(record: &log::Record) -> usize {
     let (record_args, record_wo_args) = split_log_args(record);
-    args_str_len(record_args)
-        + std::mem::size_of::<usize>()
+    std::mem::size_of::<usize>()
+        + args_str_len(record_args)
+        + std::mem::size_of::<RecordWithoutArgs>()
         + record_wo_args.extent()
 }
 
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    use quickcheck_derive::Arbitrary;
+    use quickcheck_macros::quickcheck;
+
+    // quickcheck-friendly log::Record ingredients
+    #[derive(Arbitrary, Clone, Debug)]
+    struct ArbitraryRecord {
+        message: String,
+        level: super::Level,
+        target: String,
+        module_path: Option<String>,
+        file: Option<String>,
+        line: Option<u32>
+    }
+
+    impl ArbitraryRecord {
+        // Turn this into a log::Record and process it (the two steps cannot be
+        // separated due to fmt::Arguments lifetime complications)
+        fn process<R>(self, action: impl FnOnce(log::Record) -> R) -> R {
+            action(
+                log::Record::builder()
+                    .args(format_args!("{}", self.message))
+                    .level(self.level.into())
+                    .target(&self.target)
+                    .module_path(self.module_path.as_ref().map(String::as_ref))
+                    .file(self.file.as_ref().map(String::as_ref))
+                    .line(self.line)
+                    // FIXME: Support key_values
+                    .build()
+            )
+        }
+    }
+
+    #[quickcheck]
+    fn round_trip(record: ArbitraryRecord) {
+        // Get a random log::Record
+        record.process(|record| {
+            // Serialize it into a Vec of bytes
+            let mut v = Vec::new();
+            unsafe { super::encode_log(&record, &mut v) }
+                .expect("Failed to serialize log::Record");
+
+            // Check that the serialization produced as many bytes as expected
+            assert_eq!(v.len(), super::measure_log(&record),
+                       "Serialized record is not as long as expected");
+
+            // Deserialize it...
+            let ((), remaining_bytes) = unsafe {
+                super::decode_and_process_log(&mut v[..], |record2| {
+                    // ...and check that the output log::Record is similar
+                    // (same Debug representation)
+                    assert_eq!(format!("{:?}", record), format!("{:?}", record2),
+                               "Deserialized log::Record does not match original")
+                })
+            }.expect("Failed to deserialize log::Record");
+
+            // Make sure that there are no leftover bytes
+            assert_eq!(remaining_bytes.len(), 0,
+                       "Unexpected leftover bytes after deserialization");
+        })
     }
 }
