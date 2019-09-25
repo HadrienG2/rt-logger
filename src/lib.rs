@@ -108,11 +108,11 @@ pub unsafe fn encode_log<W: Write>(record: &log::Record, mut write: W) -> IOResu
     let (record_args, record_wo_args) = split_log_args(record);
 
     // Push the log message's size, then the log message itself
-    abomonation::encode(&args_str_len(record_args), &mut write)?;
+    abomonation::encode::<usize, _>(&args_str_len(record_args), &mut write)?;
     write.write_fmt(record_args)?;
 
     // Push the other record parameters
-    abomonation::encode(&record_wo_args, &mut write)
+    abomonation::encode::<RecordWithoutArgs, _>(&record_wo_args, &mut write)
 }
 
 
@@ -160,10 +160,10 @@ pub unsafe fn decode_and_process_log<'a, R>(
 // Report the number of bytes required to encode a log::Record
 pub fn measure_log(record: &log::Record) -> usize {
     let (record_args, record_wo_args) = split_log_args(record);
-    std::mem::size_of::<usize>()
-        + args_str_len(record_args)
-        + std::mem::size_of::<RecordWithoutArgs>()
-        + record_wo_args.extent()
+    let message_len = args_str_len(record_args);
+    abomonation::measure::<usize>(&message_len)
+        + message_len
+        + abomonation::measure::<RecordWithoutArgs>(&record_wo_args)
 }
 
 
