@@ -74,7 +74,7 @@ unsafe_abomonate!{ RecordWithoutArgs<'_> : level,
 /// Separate the fmt::Arguments from the rest of a log::Record
 ///
 /// fmt::Arguments is too opaque to be serializable, therefore it must be
-/// handled specially by just printing it to the output data stream.
+/// handled specially by printing it to the output data stream.
 fn split_log_args<'a>(record: &log::Record<'a>) -> (fmt::Arguments<'a>,
                                                     RecordWithoutArgs<'a>) {
     let record_wo_args = RecordWithoutArgs {
