@@ -24,7 +24,7 @@ enum Level {
     Trace,
 }
 
-unsafe impl Abomonation for Level {}
+unsafe impl Abomonation<'_> for Level {}
 
 impl From<log::Level> for Level {
     fn from(l: log::Level) -> Self {
