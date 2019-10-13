@@ -19,6 +19,7 @@ use std::{
 /// A log::Level clone on which I can derive traits
 //
 // NOTE: Mirrors log::Level, must be kept in sync with it
+//
 #[cfg_attr(test, derive(Arbitrary))]
 #[derive(Clone, Copy, Debug)]
 enum Level {
@@ -61,6 +62,7 @@ impl Into<log::Level> for Level {
 /// A log::Record clone (w/o args) on which I can derive traits
 //
 // NOTE: Mirrors log::Record, must be kept in sync with it
+//
 struct RecordWithoutArgs<'a> {
     level: Level,
     target: &'a str,
@@ -227,6 +229,7 @@ mod tests {
         /// Turn this into a log::Record, process it, and return the result
         ///
         /// We can't return the Record due to fmt::Arguments lifetime issues.
+        ///
         fn process<R>(self, action: impl FnOnce(log::Record) -> R) -> R {
             action(
                 log::Record::builder()
