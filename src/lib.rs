@@ -1,6 +1,4 @@
-use abomonation::Abomonation;
-#[allow(deprecated)]
-use abomonation::unsafe_abomonate;
+use abomonation::{Entomb, Exhume};
 
 #[cfg(test)]
 use quickcheck_derive::Arbitrary;
@@ -8,6 +6,7 @@ use quickcheck_derive::Arbitrary;
 use std::{
     fmt,
     io::{Result as IOResult, Write},
+    ptr::NonNull,
 };
 
 
@@ -24,7 +23,9 @@ enum Level {
     Trace,
 }
 
-unsafe impl Abomonation<'_> for Level {}
+// FIXME: Derive this, rather than implementing it manually
+unsafe impl Entomb for Level {}
+unsafe impl Exhume<'_> for Level {}
 
 impl From<log::Level> for Level {
     fn from(l: log::Level) -> Self {
@@ -64,12 +65,34 @@ struct RecordWithoutArgs<'a> {
     // FIXME: Support key_values
 }
 
-// FIXME: Fix abomonation_derive so that I can use it
-unsafe_abomonate!{ RecordWithoutArgs<'_> : level,
-                                           target,
-                                           module_path,
-                                           file,
-                                           line }
+// FIXME: Derive this, rather than implementing it manually
+unsafe impl Entomb for RecordWithoutArgs<'_> {
+    unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
+        Level::entomb(&self.level, write)?;
+        <&str>::entomb(&self.target, write)?;
+        <Option<&str>>::entomb(&self.module_path, write)?;
+        <Option<&str>>::entomb(&self.file, write)?;
+        <Option<u32>>::entomb(&self.line, write)
+    }
+
+    fn extent(&self) -> usize {
+        Level::extent(&self.level)
+        + <&str>::extent(&self.target)
+        + <Option<&str>>::extent(&self.module_path)
+        + <Option<&str>>::extent(&self.file)
+        + <Option<u32>>::extent(&self.line)
+    }
+}
+//
+unsafe impl<'de> Exhume<'de> for RecordWithoutArgs<'de> {
+    unsafe fn exhume(self_: NonNull<Self>, mut bytes: &'de mut [u8]) -> Option<&'de mut [u8]> {
+        bytes = Level::exhume(From::from(&mut (*self_.as_ptr()).level), bytes)?;
+        bytes = <&str>::exhume(From::from(&mut (*self_.as_ptr()).target), bytes)?;
+        bytes = <Option<&str>>::exhume(From::from(&mut (*self_.as_ptr()).module_path), bytes)?;
+        bytes = <Option<&str>>::exhume(From::from(&mut (*self_.as_ptr()).file), bytes)?;
+        <Option<u32>>::exhume(From::from(&mut (*self_.as_ptr()).line), bytes)
+    }
+}
 
 /// Separate the fmt::Arguments from the rest of a log::Record
 ///
