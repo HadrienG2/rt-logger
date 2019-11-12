@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 log = "0.4"
 abomonation = { path = "../abomonation" }
+abomonation_derive = { path = "../abomonation_derive" }
 
 [dev-dependencies]
 quickcheck = "0.9"

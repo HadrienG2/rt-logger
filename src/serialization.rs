@@ -4,7 +4,8 @@
 //! transferring a log::Record across threads, aka abomonation. As a result, the
 //! serialization is not properly type-checked, and is therefore unsafe.
 
-use abomonation::{Entomb, Exhume};
+use abomonation::Entomb;
+use abomonation_derive::{Abomonation};
 
 #[cfg(test)]
 use quickcheck_derive::Arbitrary;
@@ -12,7 +13,6 @@ use quickcheck_derive::Arbitrary;
 use std::{
     fmt,
     io::{Result as IOResult, Write},
-    ptr::NonNull,
 };
 
 
@@ -21,7 +21,7 @@ use std::{
 // NOTE: Mirrors log::Level, must be kept in sync with it
 //
 #[cfg_attr(test, derive(Arbitrary))]
-#[derive(Clone, Copy, Debug)]
+#[derive(Abomonation, Clone, Copy, Debug)]
 enum Level {
     Error,
     Warn,
@@ -29,10 +29,6 @@ enum Level {
     Debug,
     Trace,
 }
-
-// FIXME: Derive this, rather than implementing it manually
-unsafe impl Entomb for Level {}
-unsafe impl Exhume<'_> for Level {}
 
 impl From<log::Level> for Level {
     fn from(l: log::Level) -> Self {
@@ -63,43 +59,17 @@ impl Into<log::Level> for Level {
 //
 // NOTE: Mirrors log::Record, must be kept in sync with it
 //
+#[derive(Abomonation)]
 struct RecordWithoutArgs<'a> {
     level: Level,
     target: &'a str,
-    // NOTE: args cannot be abomonated and must be serialized separately
+    // NOTE: args cannot be abomonated and must be printed as a string, we
+    //       only keep track of the length of said string here
+    args_len: usize,
     module_path: Option<&'a str>,
     file: Option<&'a str>,
     line: Option<u32>,
     // FIXME: Support key_values
-}
-
-// FIXME: Derive this, rather than implementing it manually
-unsafe impl Entomb for RecordWithoutArgs<'_> {
-    unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
-        Level::entomb(&self.level, write)?;
-        <&str>::entomb(&self.target, write)?;
-        <Option<&str>>::entomb(&self.module_path, write)?;
-        <Option<&str>>::entomb(&self.file, write)?;
-        <Option<u32>>::entomb(&self.line, write)
-    }
-
-    fn extent(&self) -> usize {
-        Level::extent(&self.level)
-        + <&str>::extent(&self.target)
-        + <Option<&str>>::extent(&self.module_path)
-        + <Option<&str>>::extent(&self.file)
-        + <Option<u32>>::extent(&self.line)
-    }
-}
-//
-unsafe impl<'de> Exhume<'de> for RecordWithoutArgs<'de> {
-    unsafe fn exhume(self_: NonNull<Self>, mut bytes: &'de mut [u8]) -> Option<&'de mut [u8]> {
-        bytes = Level::exhume(From::from(&mut (*self_.as_ptr()).level), bytes)?;
-        bytes = <&str>::exhume(From::from(&mut (*self_.as_ptr()).target), bytes)?;
-        bytes = <Option<&str>>::exhume(From::from(&mut (*self_.as_ptr()).module_path), bytes)?;
-        bytes = <Option<&str>>::exhume(From::from(&mut (*self_.as_ptr()).file), bytes)?;
-        <Option<u32>>::exhume(From::from(&mut (*self_.as_ptr()).line), bytes)
-    }
 }
 
 /// Separate the fmt::Arguments from the rest of a log::Record
@@ -112,6 +82,7 @@ fn split_log_args<'a>(record: &log::Record<'a>) -> (fmt::Arguments<'a>,
     let record_wo_args = RecordWithoutArgs {
         level: record.level().into(),
         target: record.target(),
+        args_len: args_str_len(*record.args()),
         module_path: record.module_path(),
         file: record.file(),
         line: record.line(),
@@ -149,12 +120,12 @@ pub unsafe fn encode_log<W: Write>(record: &log::Record, mut write: W) -> IOResu
     // Isolate the fmt::Arguments from the input record
     let (record_args, record_wo_args) = split_log_args(record);
 
-    // Push the log message's size, then the log message itself
-    abomonation::encode::<usize, _>(&args_str_len(record_args), &mut write)?;
-    write.write_fmt(record_args)?;
+    // Push everything but the fmt::Arguments. This includes the length of the
+    // formatted fmt::Arguments, which we'll use during decoding.
+    abomonation::encode::<RecordWithoutArgs, _>(&record_wo_args, &mut write)?;
 
-    // Push the other record parameters
-    abomonation::encode::<RecordWithoutArgs, _>(&record_wo_args, &mut write)
+    // Print the fmt::Arguments as an UTF-8 string at the end.
+    write.write_fmt(record_args)
 }
 
 
@@ -169,20 +140,21 @@ pub unsafe fn encode_log<W: Write>(record: &log::Record, mut write: W) -> IOResu
 ///
 /// This function uses `abomonation::decode` and inherits its safety issues.
 ///
+/// Input bytes must be aligned on a `log_alignment()` boundary.
+///
 pub unsafe fn decode_and_process_log<'a, R>(
     bytes: &'a mut [u8],
     mut process: impl FnMut(&log::Record) -> R
 ) -> Option<(R, &'a mut [u8])> {
-    // Retrieve message size, abort if input buffer is too small
-    let (msg_size, bytes) = abomonation::decode::<usize>(bytes)?;
-    if *msg_size > bytes.len() { return None; }
+    // Retrieve everything but the fmt::Arguments.
+    let (record_wo_args, bytes) = abomonation::decode::<RecordWithoutArgs>(bytes)?;
 
-    // Retrieve message
-    let (msg_bytes, bytes) = bytes.split_at_mut(*msg_size);
+    // Retrieve the fmt::Arguments string, abort if input buffer is too small
+    if record_wo_args.args_len > bytes.len() { return None; }
+    let (msg_bytes, bytes) = bytes.split_at_mut(record_wo_args.args_len);
     let msg = std::str::from_utf8_unchecked(msg_bytes);
 
-    // Retrieve remaining fields, reconstruct record, and process it
-    let (record_wo_args, bytes) = abomonation::decode::<RecordWithoutArgs>(bytes)?;
+    // Reconstruct a log::Record and process it
     let result = process(
         &log::Record::builder()
                      .args(format_args!("{}", msg))
@@ -201,18 +173,23 @@ pub unsafe fn decode_and_process_log<'a, R>(
 
 /// Report the number of bytes required to serialize a log::Record
 pub fn measure_log(record: &log::Record) -> usize {
-    let (record_args, record_wo_args) = split_log_args(record);
-    let message_len = args_str_len(record_args);
-    abomonation::measure::<usize>(&message_len)
-        + message_len
-        + abomonation::measure::<RecordWithoutArgs>(&record_wo_args)
+    let (_record_args, record_wo_args) = split_log_args(record);
+    abomonation::measure::<RecordWithoutArgs>(&record_wo_args)
+        + record_wo_args.args_len
+}
+
+/// Report the memory alignment of a serialized log::Record
+pub fn log_alignment() -> usize {
+    <RecordWithoutArgs as Entomb>::alignment()
 }
 
 
 #[cfg(test)]
 mod tests {
+    use abomonation::align::AlignedBytes;
     use quickcheck_derive::Arbitrary;
     use quickcheck_macros::quickcheck;
+    use super::RecordWithoutArgs;
 
     /// quickcheck-friendly variant of log::Record
     #[derive(Arbitrary, Clone, Debug)]
@@ -251,17 +228,18 @@ mod tests {
         // Get a random log::Record
         record.process(|record| {
             // Serialize it into a Vec of bytes
-            let mut v = Vec::new();
-            unsafe { super::encode_log(&record, &mut v) }
+            let mut bytes = Vec::new();
+            unsafe { super::encode_log(&record, &mut bytes) }
                 .expect("Failed to serialize log::Record");
 
             // Check that the serialization produced as many bytes as expected
-            assert_eq!(v.len(), super::measure_log(&record),
+            assert_eq!(bytes.len(), super::measure_log(&record),
                        "Serialized record is not as long as expected");
 
             // Deserialize it...
+            let mut bytes = AlignedBytes::<RecordWithoutArgs>::new(&mut bytes[..]);
             let ((), remaining_bytes) = unsafe {
-                super::decode_and_process_log(&mut v[..], |record2| {
+                super::decode_and_process_log(&mut bytes, |record2| {
                     // ...and check that the output log::Record is similar
                     // (our criteria being having the same Debug representation)
                     assert_eq!(format!("{:?}", record),
