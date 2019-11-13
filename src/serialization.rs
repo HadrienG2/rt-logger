@@ -117,7 +117,7 @@ struct RecordWithoutArgs<'a> {      // === PROOF OF ABSENCE OF PADDING BYTES ===
                                     // + No data recursively serialized by
                                     //   abomonation (via the &str refs) has
                                     //   padding bytes, since UTF-8 has align=1.
-    // FIXME: Support key_values, bearing in mind the above constraints
+    // TODO: Support key_values, bearing in mind the above constraints
 }
 
 /// Separate the fmt::Arguments from the rest of a log::Record
@@ -135,7 +135,7 @@ fn split_log_args<'a>(record: &log::Record<'a>) -> (fmt::Arguments<'a>,
         // This is okay because line numbers are 1-based, so 0 can't ever appear
         line: record.line().unwrap_or(0),
         __padding1: 0,
-        // FIXME: Support key_values
+        // TODO: Support key_values
     };
     (*record.args(), record_wo_args)
 }
@@ -219,7 +219,7 @@ pub unsafe fn decode_and_process_log<'a, R>(
                      .module_path(record_wo_args.module_path)
                      .file(record_wo_args.file)
                      .line(record_line)
-                     // FIXME: Support key_values
+                     // TODO: Support key_values
                      .build()
     );
 
@@ -296,7 +296,7 @@ mod tests {
                     .file(self.file.as_ref().map(String::as_ref))
                     // Zero line numbers don't exist and we exploit this
                     .line(self.line.filter(|&line| line != 0))
-                    // FIXME: Support key_values
+                    // TODO: Support key_values
                     .build()
             )
         }
