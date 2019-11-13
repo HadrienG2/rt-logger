@@ -79,10 +79,13 @@ impl Into<log::Level> for Level {
 /// stabilization of structured logging in `log` by providing a way to serialize
 /// that information too.
 ///
+/// # Safety
+///
 /// This struct must have no uninitialized padding bytes in order to avoid
 /// triggering UB in `abomonation::encode`. Until that UB issue is resolved,
-/// which will require core Rust changes, please preserve this property while
-/// extending the struct for future `log` version support.
+/// which will require core Rust changes and may therefore take a long while,
+/// please preserve this property while extending this struct for support of
+/// future `log` versions and features.
 #[derive(Abomonation)]
 #[repr(C)]  // Used for padding byte avoidance through fine data layout control
 struct RecordWithoutArgs<'a> {      // === PROOF OF ABSENCE OF PADDING BYTES ===
