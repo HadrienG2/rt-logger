@@ -177,10 +177,15 @@ pub fn encode_log<W: Write>(record: &log::Record, mut write: W) -> IOResult<()> 
 /// # Safety
 ///
 /// This function should only be used on bytes that were produced by
-/// `encode_log()`. Passing arbitrary bytes to it can result in undefined
-/// behavior such as null references or invalid UTF-8 in an &str.
+/// `encode_log()` _from the same build of this library_. Passing arbitrary
+/// bytes to it can result in undefined behavior such as null references or
+/// invalid UTF-8 in an &str. And different builds of this library (e.g. from
+/// different CPU architectures, with different compiler settings...) may not
+/// agree on the data format which serialized bytes should have.
 ///
-/// Furthermore, input bytes must be aligned on a `log_alignment()` boundary.
+/// In addition, input bytes must be aligned on a `log_alignment()` boundary, or
+/// else you'll get misaligned pointer UB (possible consequences of which
+/// include mangled data and instant "invalid operation" program crashes).
 pub unsafe fn decode_and_process_log<'a, R>(
     bytes: &'a mut [u8],
     mut process: impl FnMut(&log::Record) -> R
