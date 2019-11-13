@@ -31,6 +31,14 @@ use std::{
 /// A log::Level clone on which I can derive traits
 ///
 /// This definition mirrors `log::Level` and must be kept in sync with it.
+///
+/// # Safety
+///
+/// This struct must have no uninitialized padding bytes in order to avoid
+/// triggering UB in `abomonation::encode`. Until that UB issue is resolved,
+/// which will require core Rust changes and may therefore take a long while,
+/// please preserve this property while extending this struct for support of
+/// future `log` versions and features.
 #[cfg_attr(test, derive(Arbitrary))]
 #[derive(Abomonation, Clone, Copy, Debug)]
 #[repr(usize)]
