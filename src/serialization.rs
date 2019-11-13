@@ -2,7 +2,19 @@
 //!
 //! This implements the most minimal serialization that will possibly allow
 //! transferring a log::Record across threads, aka abomonation. As a result, the
-//! serialization is not properly type-checked, and is therefore unsafe.
+//! serialization is not properly type-checked, and is therefore unsafe. The
+//! intent is to provide a safe API on top of that.
+//!
+//! We do not use serde because...
+//! - By itself, Serde does not guarantee real-time safety. In fact, the default
+//!   implementation of Serializer::collect_str(), which is used when
+//!   serializing `fmt::Arguments`, is RT-unsafe because it allocates a String.
+//! - There does not seem to be particular interest in addressing this from
+//!   popular Serde serializers, even performance-oriented ones like bincode
+//!   (see https://github.com/servo/bincode/issues/172 )
+//! - Complex serde serializers with features like schema evolution are overkill
+//!   for our intra-process use case and likely to bring performance down,
+//!   whereas we aim to enable logging on RT threads with a tight time budget.
 
 use abomonation::Entomb;
 use abomonation_derive::{Abomonation};
