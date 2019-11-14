@@ -219,7 +219,7 @@ pub fn encode_log<W: Write>(record: &log::Record, mut write: W) -> IOResult<()> 
 /// include mangled data and instant "invalid operation" program crashes).
 pub unsafe fn decode_and_process_log<'a, R>(
     bytes: &'a mut [u8],
-    mut process: impl FnMut(&log::Record) -> R
+    process: impl FnOnce(&log::Record) -> R
 ) -> Option<(R, &'a mut [u8])> {
     // Retrieve everything but the fmt::Arguments.
     let (record_wo_args, bytes) = abomonation::decode::<RecordWithoutArgs>(bytes)?;
