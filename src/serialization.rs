@@ -24,6 +24,7 @@ use quickcheck_derive::Arbitrary;
 
 use std::{
     fmt,
+    num::NonZeroU32,
     io::{Result as IOResult, Write},
 };
 
@@ -100,9 +101,18 @@ impl Into<log::Level> for Level {
 /// which will require core Rust changes and may therefore take a long while,
 /// please preserve this property while extending this struct for support of
 /// future `log` versions and features.
+///
+/// Proving absence of padding bytes may only be done for a specific pointer
+/// width. So far, this has been done for 16-bit, 32-bit, 64-bit and 128-bit
+/// architectures, which covers all architectures that Rust supports currently
+/// and is expected to support for the foreseeable future. If a proof has not
+/// been provided for your architecture, the RecordWithoutArgs type will not be
+/// available, in which case you are welcome to do the proof and submit a patch.
 //
 // TODO: Once the padding bytes issue is resolved, remove the repr(C) and manual
 //       padding and implement the language-level padding bytes UB fix instead.
+#[cfg(any(target_pointer_width = "16", target_pointer_width = "32",
+          target_pointer_width = "64", target_pointer_width = "128"))]
 #[derive(Abomonation)]
 #[repr(C)]  // Used for padding byte avoidance through fine data layout control
 struct RecordWithoutArgs<'a> {      // === PROOF OF ABSENCE OF PADDING BYTES ===
@@ -113,18 +123,17 @@ struct RecordWithoutArgs<'a> {      // === PROOF OF ABSENCE OF PADDING BYTES ===
                                     //                no padding btw same type
     file: Option<&'a str>,          // repr = 2*usize due to null ref opt,
                                     //                no padding btw same type
-    line: u32,  /* 0 means None */  // repr = u32, <= usize on 32/64-bit CPUs,
-                                    //             so no padding expected there.
-                                    //             Also happens to works for
-                                    //             16-bit CPUs, because
-                                    //             8*16-bit above = 4*32-bit, so
-                                    //             we'd stay aligned on 32-bit
-                                    //             through the fields above.
-                                    //             Rust doesn't support <16-bit
-                                    //             or non-power-of-2 addresses.
+    line: Option<NonZeroU32>,       // repr = u32 due to NonZeroU32 opt, and
+                                    //            u32 <= usize on 32/64-bit
+                                    //            CPUs, so no padding expected.
+                                    //            Also happens to works for
+                                    //            16-bit CPUs, because
+                                    //            8*16-bit above = 4*32-bit, so
+                                    //            we'd stay aligned on 32-bit
+                                    //            through the fields above.
     #[cfg(target_pointer_width="64")]
-    __padding1: u32,                // Needed so that size is multiple of align
-                                    // on 64-bit platforms.
+    __padding1: u32,                // Needed so that struct size is multiple of
+                                    // align on 64-bit platforms.
     #[cfg(target_pointer_width="128")]
     __padding2: u64,                // Needed so that size is multiple of align
                                     // on 128-bit platforms (yes, those might be
@@ -149,8 +158,9 @@ fn split_log_args<'a>(record: &log::Record<'a>) -> (fmt::Arguments<'a>,
         args_len: args_str_len(*record.args()),
         module_path: record.module_path(),
         file: record.file(),
-        // This is okay because line numbers are 1-based, so 0 can't ever appear
-        line: record.line().unwrap_or(0),
+        line: record.line().map(|line| {
+            NonZeroU32::new(line).expect("Line numbers should be 1-based")
+        }),
         #[cfg(target_pointer_width="64")]
         __padding1: 0,
         #[cfg(target_pointer_width="128")]
@@ -230,7 +240,6 @@ pub unsafe fn decode_and_process_log<'a, R>(
     let msg = std::str::from_utf8_unchecked(msg_bytes);
 
     // Reconstruct a log::Record and process it
-    let record_line = Some(record_wo_args.line).filter(|&line| line != 0);
     let result = process(
         &log::Record::builder()
                      .args(format_args!("{}", msg))
@@ -238,7 +247,7 @@ pub unsafe fn decode_and_process_log<'a, R>(
                      .target(record_wo_args.target)
                      .module_path(record_wo_args.module_path)
                      .file(record_wo_args.file)
-                     .line(record_line)
+                     .line(record_wo_args.line.map(u32::from))
                      // TODO: Support key_values
                      .build()
     );
