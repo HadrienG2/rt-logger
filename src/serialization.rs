@@ -44,7 +44,7 @@ use std::{
 /// member-less enum with repr(usize) (usize is needed for RecordWithoutArgs).
 //
 // TODO: Once the padding bytes issue is resolved, remove this space-inefficient
-//       repr directive and implement the padding bytes UB fix instead.
+//       repr and implement the language-level padding bytes UB fix instead.
 #[cfg_attr(test, derive(Arbitrary))]
 #[derive(Abomonation, Clone, Copy, Debug)]
 #[repr(usize)]
@@ -101,8 +101,8 @@ impl Into<log::Level> for Level {
 /// please preserve this property while extending this struct for support of
 /// future `log` versions and features.
 //
-// TODO: Once the padding bytes issue is resolved, remove this space-inefficient
-//       repr + manual padding and implement the padding bytes UB fix instead.
+// TODO: Once the padding bytes issue is resolved, remove the repr(C) and manual
+//       padding and implement the language-level padding bytes UB fix instead.
 #[derive(Abomonation)]
 #[repr(C)]  // Used for padding byte avoidance through fine data layout control
 struct RecordWithoutArgs<'a> {      // === PROOF OF ABSENCE OF PADDING BYTES ===
