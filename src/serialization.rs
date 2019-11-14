@@ -39,6 +39,12 @@ use std::{
 /// which will require core Rust changes and may therefore take a long while,
 /// please preserve this property while extending this struct for support of
 /// future `log` versions and features.
+///
+/// For now, that property is guaranteed for free by `Level` being a
+/// member-less enum with repr(usize) (usize is needed for RecordWithoutArgs).
+//
+// TODO: Once the padding bytes issue is resolved, remove this space-inefficient
+//       repr directive and implement the padding bytes UB fix instead.
 #[cfg_attr(test, derive(Arbitrary))]
 #[derive(Abomonation, Clone, Copy, Debug)]
 #[repr(usize)]
@@ -94,6 +100,9 @@ impl Into<log::Level> for Level {
 /// which will require core Rust changes and may therefore take a long while,
 /// please preserve this property while extending this struct for support of
 /// future `log` versions and features.
+//
+// TODO: Once the padding bytes issue is resolved, remove this space-inefficient
+//       repr + manual padding and implement the padding bytes UB fix instead.
 #[derive(Abomonation)]
 #[repr(C)]  // Used for padding byte avoidance through fine data layout control
 struct RecordWithoutArgs<'a> {      // === PROOF OF ABSENCE OF PADDING BYTES ===
@@ -104,15 +113,23 @@ struct RecordWithoutArgs<'a> {      // === PROOF OF ABSENCE OF PADDING BYTES ===
                                     //                no padding btw same type
     file: Option<&'a str>,          // repr = 2*usize due to null ref opt,
                                     //                no padding btw same type
-    line: u32,  /* 0 means None */  // repr = u32, <= usize on 32-bit+ CPUs, so
-                                    //             no padding expected.
+    line: u32,  /* 0 means None */  // repr = u32, <= usize on 32/64-bit CPUs,
+                                    //             so no padding expected there.
                                     //             Also happens to works for
                                     //             16-bit CPUs, because
                                     //             8*16-bit above = 4*32-bit, so
-                                    //             we'd stay align on 32-bit
+                                    //             we'd stay aligned on 32-bit
                                     //             through the fields above.
-    __padding1: u32                 // Needed so that size is multiple of align
+                                    //             Rust doesn't support <16-bit
+                                    //             or non-power-of-2 addresses.
+    #[cfg(target_pointer_width="64")]
+    __padding1: u32,                // Needed so that size is multiple of align
                                     // on 64-bit platforms.
+    #[cfg(target_pointer_width="128")]
+    __padding2: u64,                // Needed so that size is multiple of align
+                                    // on 128-bit platforms (yes, those might be
+                                    // on the future horizon, e.g. RISC-V has
+                                    // defined an instruction set for that...).
                                     //
                                     // + No data recursively serialized by
                                     //   abomonation (via the &str refs) has
@@ -134,7 +151,10 @@ fn split_log_args<'a>(record: &log::Record<'a>) -> (fmt::Arguments<'a>,
         file: record.file(),
         // This is okay because line numbers are 1-based, so 0 can't ever appear
         line: record.line().unwrap_or(0),
+        #[cfg(target_pointer_width="64")]
         __padding1: 0,
+        #[cfg(target_pointer_width="128")]
+        __padding2: 0,
         // TODO: Support key_values
     };
     (*record.args(), record_wo_args)
@@ -267,7 +287,10 @@ mod tests {
                                                // == &str due to null ref opt
                        + 2*size_of::<usize>()  // file: Option<&str>, cf above
                        + size_of::<u32>()      // line: u32
-                       + size_of::<u32>()      // __padding1: u32
+                       + if cfg!(target_pointer_width="64")  // __padding1: u32
+                         { size_of::<u32>() } else { 0 }
+                       + if cfg!(target_pointer_width="128")  // __padding2: u64
+                         { size_of::<u64>() } else { 0 }
                   );
     }
 
