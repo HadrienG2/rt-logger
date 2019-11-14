@@ -394,7 +394,8 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use testbench;
+    use abomonation::align::AlignedBytes;
+    use super::RecordWithoutArgs;
 
     macro_rules! long_string {
         () => {"This is a long string, you can use it to benchmark specific \
@@ -564,7 +565,7 @@ mod benchmarks {
         // Serialize the log
         let mut bytes = Vec::with_capacity(super::measure_log(&record));
         super::encode_log(&record, &mut bytes).unwrap();
-        assert_eq!((bytes.as_ptr() as usize) % super::log_alignment(), 0);
+        let mut bytes = AlignedBytes::<RecordWithoutArgs>::new(&mut bytes);
 
         // Benchmark log deserialization
         testbench::benchmark(NUM_BENCH_ITERS, || {
