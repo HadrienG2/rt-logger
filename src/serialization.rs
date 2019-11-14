@@ -111,6 +111,15 @@ impl Into<log::Level> for Level {
 //
 // TODO: Once the padding bytes issue is resolved, remove the repr(C) and manual
 //       padding and implement the language-level padding bytes UB fix instead.
+//
+// TODO: Once I have a microbenchmark infrastructure, check the perf impact of
+//       replacing &str with usize lengths as I did for args_len and printing
+//       every string after the struct. It's more manual busywork, requires an
+//       Optioned deb + blacklisting usize::MAX-sized strings, and more unsafe
+//       if I want to avoid UTF-8 re-parsing, so it's only justifiable if there
+//       is demonstrable performance benefit to doing so. If I do it, then make
+//       Level repr(u32) and move it at end of struct => 16-bit happy and 64-bit
+//       has no padding bytes anymore!
 #[cfg(any(target_pointer_width = "16", target_pointer_width = "32",
           target_pointer_width = "64", target_pointer_width = "128"))]
 #[derive(Abomonation)]
