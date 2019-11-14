@@ -388,3 +388,204 @@ mod tests {
         })
     }
 }
+
+
+/// Performance benchmarks
+///
+/// These benchmarks masquerading as tests are a stopgap solution until
+/// benchmarking lands in Stable Rust. They should be compiled in release mode,
+/// and run with only one OS thread. In addition, the default behaviour of
+/// swallowing test output should obviously be suppressed.
+///
+/// TL;DR: cargo test --release -- --ignored --nocapture --test-threads=1
+///
+/// TODO: Switch to standard Rust benchmarks once they are stable
+///
+#[cfg(test)]
+mod benchmarks {
+    use testbench;
+
+    macro_rules! long_string {
+        () => {"This is a long string, you can use it to benchmark specific \
+               parts of the log record (de)serialization process. The string \
+               is long enough to offset the overhead of any other field of the \
+               log record. Sadly, we can't just use an &'static str because \
+               the std::fmt machinery truly, positively wants a string \
+               literal, but hopefully you won't mind this somewhat unorthodox \
+               use of macros, everything-looks-like-a-nail style... But \
+               now, seriously, if your logs are getting longer than this \
+               string, you may really want to consider shrinking them!"}
+    }
+
+    const NUM_BENCH_ITERS: u32 = 50_000_000;
+
+    /// Produce a minimal log record for benchmarking fixed codec overheads
+    fn min_record() -> log::Record<'static> {
+        log::Record::builder()
+            .args(format_args!(""))
+            .level(log::Level::Error)
+            .target(&"")
+            .module_path(None)
+            .file(None)
+            .line(None)
+            // TODO: Support key_values
+            .build()
+    }
+
+    /// Benchmark for minimal serialization overhead
+    #[test]
+    #[ignore]
+    fn min_serialize() {
+        bench_serialize(&min_record());
+    }
+
+    /// Benchmark for minimal deserialization overhead
+    #[test]
+    #[ignore]
+    fn min_deserialize() {
+        bench_deserialize(&min_record());
+    }
+
+    /// Produce a log record with big args
+    fn args_record() -> log::Record<'static> {
+        log::Record::builder()
+            .args(format_args!(long_string!()))
+            .level(log::Level::Error)
+            .target(&"")
+            .module_path(None)
+            .file(None)
+            .line(None)
+            // TODO: Support key_values
+            .build()
+    }
+
+    /// Benchmark for args serialization overhead
+    #[test]
+    #[ignore]
+    fn args_serialize() {
+        bench_serialize(&args_record());
+    }
+
+    /// Benchmark for args deserialization overhead
+    #[test]
+    #[ignore]
+    fn args_deserialize() {
+        bench_deserialize(&args_record());
+    }
+
+    /// Produce a log record with a big target
+    fn target_record() -> log::Record<'static> {
+        log::Record::builder()
+            .args(format_args!(""))
+            .level(log::Level::Error)
+            .target(&long_string!())
+            .module_path(None)
+            .file(None)
+            .line(None)
+            // TODO: Support key_values
+            .build()
+    }
+
+    /// Benchmark for target serialization overhead
+    #[test]
+    #[ignore]
+    fn target_serialize() {
+        bench_serialize(&target_record());
+    }
+
+    /// Benchmark for target deserialization overhead
+    #[test]
+    #[ignore]
+    fn target_deserialize() {
+        bench_deserialize(&target_record());
+    }
+
+    /// Produce a log record with a big module path
+    fn module_record() -> log::Record<'static> {
+        log::Record::builder()
+            .args(format_args!(""))
+            .level(log::Level::Error)
+            .target(&"")
+            .module_path(Some(&long_string!()))
+            .file(None)
+            .line(None)
+            // TODO: Support key_values
+            .build()
+    }
+
+    /// Benchmark for module path serialization overhead
+    #[test]
+    #[ignore]
+    fn module_serialize() {
+        bench_serialize(&module_record());
+    }
+
+    /// Benchmark for module path deserialization overhead
+    #[test]
+    #[ignore]
+    fn module_deserialize() {
+        bench_deserialize(&module_record());
+    }
+
+    /// Produce a log record with a big file path
+    fn file_record() -> log::Record<'static> {
+        log::Record::builder()
+            .args(format_args!(""))
+            .level(log::Level::Error)
+            .target(&"")
+            .module_path(None)
+            .file(Some(&long_string!()))
+            .line(None)
+            // TODO: Support key_values
+            .build()
+    }
+
+    /// Benchmark for file path serialization overhead
+    #[test]
+    #[ignore]
+    fn file_serialize() {
+        bench_serialize(&file_record());
+    }
+
+    /// Benchmark for file path deserialization overhead
+    #[test]
+    #[ignore]
+    fn file_deserialize() {
+        bench_deserialize(&file_record());
+    }
+
+    /// Generic microbenchmark for serialization overhead
+    fn bench_serialize(record: &log::Record) {
+        // Prepare storage for serializing the log
+        let expected_size = super::measure_log(&record);
+        let mut bytes = Vec::with_capacity(expected_size);
+
+        // Benchmark log serialization
+        testbench::benchmark(NUM_BENCH_ITERS, || {
+            bytes.clear();
+            super::encode_log(&record, &mut bytes).unwrap();
+            assert_eq!(bytes.len(), expected_size);
+        });
+    }
+
+    /// Generic microbenchmark for deserialization overhead
+    fn bench_deserialize(record: &log::Record) {
+        // Serialize the log
+        let mut bytes = Vec::with_capacity(super::measure_log(&record));
+        super::encode_log(&record, &mut bytes).unwrap();
+        assert_eq!((bytes.as_ptr() as usize) % super::log_alignment(), 0);
+
+        // Benchmark log deserialization
+        testbench::benchmark(NUM_BENCH_ITERS, || {
+            unsafe {
+                super::decode_and_process_log(&mut bytes, ignore_log)
+            }.unwrap();
+        });
+    }
+
+    /// A non-optimizable no-op for log deserialization benchmarks
+    #[inline(never)]
+    fn ignore_log(record: &log::Record) {
+        assert_eq!(record.line(), None);  // True of all test records
+    }
+}
