@@ -435,8 +435,17 @@ mod benchmarks {
         // Benchmark log deserialization
         testbench::benchmark(NUM_BENCH_ITERS, || {
             unsafe {
-                super::decode_and_process_log(&mut bytes, bench::ignore_log)
+                super::decode_and_process_log(&mut bytes, ignore_log)
             }.unwrap();
         });
+    }
+
+    /// A non-optimizable ~no-op for log deserialization benchmarks
+    #[inline(never)]
+    pub fn ignore_log(record: &log::Record) {
+        // Even with inline(never), it's more prudent to do _something_ with the
+        // parameter, just to make sure the compiler doesn't add some sort of
+        // "does not make meaningful use of parameter" metadata to the function.
+        assert_eq!(record.level(), log::Level::Error);
     }
 }

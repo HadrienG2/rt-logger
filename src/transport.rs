@@ -38,6 +38,7 @@ const LOG_STORAGE_BLOCK_SIZE: usize = 1024;
 #[cfg_attr(target_pointer_width = "128", repr(align(16)))]
 struct LogStorageBlock([u8; LOG_STORAGE_BLOCK_SIZE]);
 
+
 /// Mechanism to send logs to a logging thread
 //
 // TODO: Experiment with other channel impls: crossbeam, a custom impl with
@@ -84,6 +85,7 @@ impl LogSender {
     //       to use such a method on real-time threads.
 }
 
+
 /// Mechanism to process logs in a logging thread
 //
 // TODO: Experiment with other channel impls: crossbeam, a custom impl with
@@ -96,6 +98,16 @@ pub struct LogReceiver {
     dropped: Arc<AtomicUsize>,
 }
 
+/// Events to be processed by the logging thread
+#[derive(Debug)]
+pub enum LogEvent<'a> {
+    /// A new log was received and should be emitted
+    Log(&'a log::Record<'a>),
+
+    /// Some logs were dropped because the log channel capacity was exhausted
+    DroppedLogs(usize),
+}
+
 impl LogReceiver {
     /// Attempt to process an incoming log without blocking.
     ///
@@ -105,8 +117,13 @@ impl LogReceiver {
     /// callback. Don't worry, we'll send you the result back.
     //
     // FIXME: Notify callback about dropped log entries as well
-    pub fn try_process<R>(&self, callback: impl FnOnce(&log::Record) -> R)
+    pub fn try_process<R>(&self, callback: impl FnOnce(LogEvent) -> R)
                          -> Result<R, TryRecvError> {
+        // Check for dropped logs
+        if let Some(dropped) = self.check_dropped_logs() {
+            return Ok(callback(LogEvent::DroppedLogs(dropped.into())));
+        }
+
         // We already check for this in unit tests, but the user may not run
         // them for his CPU architecture, so having an extra layer of
         // defense-in-depth in debug builds is a good idea.
@@ -124,8 +141,10 @@ impl LogReceiver {
         // matching one build of `LogSender` with another build of `LogReceiver`
         // and alignment is taken care of by the LogStorageBlock newtype.
         Ok(unsafe {
-            serialization::decode_and_process_log(&mut storage_block.0[..],
-                                                  callback)
+            serialization::decode_and_process_log(
+                &mut storage_block.0[..],
+                |log| callback(LogEvent::Log(log))
+            )
         }.expect("Failed to decode a serialized log").0)
     }
 
@@ -136,12 +155,18 @@ impl LogReceiver {
     ///
     /// The log overrun counter will be reset when this function is called.
     ///
-    pub fn check_dropped_logs(&self) -> Option<NonZeroUsize> {
-        NonZeroUsize::new(self.dropped.swap(0, Ordering::Relaxed))
+    fn check_dropped_logs(&self) -> Option<NonZeroUsize> {
+        // Avoid expensive atomic RMW operations unless necessary
+        if self.dropped.load(Ordering::Relaxed) != 0 {
+            NonZeroUsize::new(self.dropped.swap(0, Ordering::Relaxed))
+        } else {
+            None
+        }
     }
 
     // FIXME: Implement other mpsc::Receiver methods
 }
+
 
 /// Create a channel for passing logs between threads
 ///
@@ -182,7 +207,7 @@ mod tests {
     };
     use quickcheck_macros::quickcheck;
     use std::num::NonZeroUsize;
-    use super::{LogStorageBlock, LOG_STORAGE_BLOCK_SIZE};
+    use super::{LogEvent, LogStorageBlock, LOG_STORAGE_BLOCK_SIZE};
 
     #[test]
     fn storage_block_alignment() {
@@ -213,25 +238,31 @@ mod tests {
             // Push the log through the channel
             sender.try_send(record.clone())
                   .expect("Failed to send a log::Record");
-            assert_eq!(receiver.check_dropped_logs(), NonZeroUsize::new(0),
-                       "A successful send should not count as a dropped log");
 
-            // Try to push another log. This should fail.
+            // Try to push another log. This should fail and be reported on the
+            // receiver's side.
             sender.try_send(record.clone())
                   .expect_err("A log channel with a capacity of 1 should only \
                                have room for one log record");
-            assert_eq!(receiver.check_dropped_logs(), NonZeroUsize::new(1),
-                       "A faild send should count as a dropped log");
-            assert_eq!(receiver.check_dropped_logs(), NonZeroUsize::new(0),
-                       "Checking the dropped log counter should reset it");
+            receiver.try_process(|event| {
+                if let LogEvent::DroppedLogs(dropped) = event {
+                    assert_eq!(dropped, 1, "Should report one dropped log");
+                } else {
+                    panic!("Dropped logs should be reported");
+                }
+            }).expect("One dropped log should be reported");
 
-            // Try to get it back...
-            receiver.try_process(|record2| {
-                // ...and check that the output log::Record is similar
-                // (our criteria being having the same Debug representation)
-                assert_eq!(format!("{:?}", record),
-                           format!("{:?}", record2),
-                           "Retrieved log::Record doesn't match")
+            // Try to get the original log back...
+            receiver.try_process(|event| {
+                if let LogEvent::Log(record2) = event {
+                    // ...and check that the output log::Record is similar
+                    // (our criteria being having the same Debug representation)
+                    assert_eq!(format!("{:?}", record),
+                               format!("{:?}", record2),
+                               "Retrieved log::Record doesn't match");
+                } else {
+                    panic!("No dropped log should be reported here");
+                }
             }).expect("Failed to retrieve log::Record");
         })
     }
@@ -252,7 +283,7 @@ mod tests {
 #[cfg(test)]
 mod benchmarks {
     use crate::bench;
-    use super::LOG_STORAGE_BLOCK_SIZE;
+    use super::{LogEvent, LOG_STORAGE_BLOCK_SIZE};
 
     // WARNING: Running these benchmarks with a high iteration count is highly
     //          memory intensive, you may want to do stats on multiple runs.
@@ -348,7 +379,7 @@ mod benchmarks {
 
         // Benchmark log reception
         testbench::benchmark(NUM_SEND_RECV_ITERS, || {
-            receiver.try_process(bench::ignore_log).unwrap();
+            receiver.try_process(ignore_event).unwrap();
         });
     }
 
@@ -366,7 +397,18 @@ mod benchmarks {
         // Benchmark log emission+reception round-trip
         testbench::benchmark(NUM_ROUND_TRIP_ITERS, || {
             sender.try_send(record.clone()).unwrap();
-            receiver.try_process(bench::ignore_log).unwrap();
+            receiver.try_process(ignore_event).unwrap();
         });
+    }
+
+    /// A non-optimizable ~no-op for log reception benchmarks
+    #[inline(never)]
+    pub fn ignore_event(event: LogEvent) {
+        // Even with inline(never), it's more prudent to do _something_ with the
+        // parameter, just to make sure the compiler doesn't add some sort of
+        // "does not make meaningful use of parameter" metadata to the function.
+        if let LogEvent::Log(record) = event {
+            assert_eq!(record.level(), log::Level::Error);
+        }
     }
 }
