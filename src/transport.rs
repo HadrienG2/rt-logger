@@ -258,6 +258,8 @@ mod benchmarks {
     //          memory intensive, you may want to do stats on multiple runs.
     const NUM_SEND_RECV_ITERS: u32 = 2_000_000;
 
+    const NUM_ROUND_TRIP_ITERS: u32 = 5_000_000;
+
     /// Benchmark for minimal log emission overhead
     #[test]
     #[ignore]
@@ -270,6 +272,13 @@ mod benchmarks {
     #[ignore]
     fn min_recv() {
         bench_recv(&bench::min_record());
+    }
+
+    /// Benchmark for minimal log emission+reception round-trip overhead
+    #[test]
+    #[ignore]
+    fn min_round_trip() {
+        bench_round_trip(&bench::min_record());
     }
 
     /// Benchmark for args log emission overhead
@@ -286,6 +295,13 @@ mod benchmarks {
         bench_recv(&bench::args_record());
     }
 
+    /// Benchmark for args log emission+reception round-trip overhead
+    #[test]
+    #[ignore]
+    fn args_round_trip() {
+        bench_round_trip(&bench::args_record());
+    }
+
     /// Benchmark for target log emission overhead
     #[test]
     #[ignore]
@@ -298,6 +314,13 @@ mod benchmarks {
     #[ignore]
     fn target_recv() {
         bench_recv(&bench::target_record());
+    }
+
+    /// Benchmark for target log emission+reception round-trip overhead
+    #[test]
+    #[ignore]
+    fn target_round_trip() {
+        bench_round_trip(&bench::target_record());
     }
 
     /// Generic microbenchmark for log emission overhead
@@ -325,6 +348,24 @@ mod benchmarks {
 
         // Benchmark log reception
         testbench::benchmark(NUM_SEND_RECV_ITERS, || {
+            receiver.try_process(bench::ignore_log).unwrap();
+        });
+    }
+
+    /// Generic microbenchmark for log emission+reception round-trip
+    ///
+    /// We normally prefer to microbenchmark individual operations, but in this
+    /// particular case that makes our benchmark unrealistically
+    /// memory-intensive, so it's good to have another benchmark with a more
+    /// realistic cache footprint as a point of comparison.
+    fn bench_round_trip(record: &log::Record) {
+        // Prepare a channel for holding the logs
+        // FIXME: Use a more realistic capacity
+        let (sender, receiver) = super::log_channel(1);
+
+        // Benchmark log emission+reception round-trip
+        testbench::benchmark(NUM_ROUND_TRIP_ITERS, || {
+            sender.try_send(record.clone()).unwrap();
             receiver.try_process(bench::ignore_log).unwrap();
         });
     }
