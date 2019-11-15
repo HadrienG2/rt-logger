@@ -407,7 +407,8 @@ mod benchmarks {
         bench_deserialize(&min_record());
     }
 
-    /// Produce a log record with big args
+    /// Produce a log record with big args for benchmarking fmt::Arguments
+    /// (de)serialization overhead
     fn args_record() -> log::Record<'static> {
         log::Record::builder()
             .args(format_args!(long_string!()))
@@ -434,7 +435,8 @@ mod benchmarks {
         bench_deserialize(&args_record());
     }
 
-    /// Produce a log record with a big target
+    /// Produce a log record with a big target for benchmarking string
+    /// (de)serialization overhead
     fn target_record() -> log::Record<'static> {
         log::Record::builder()
             .args(format_args!(""))
@@ -459,60 +461,6 @@ mod benchmarks {
     #[ignore]
     fn target_deserialize() {
         bench_deserialize(&target_record());
-    }
-
-    /// Produce a log record with a big module path
-    fn module_record() -> log::Record<'static> {
-        log::Record::builder()
-            .args(format_args!(""))
-            .level(log::Level::Error)
-            .target(&"")
-            .module_path(Some(&long_string!()))
-            .file(None)
-            .line(None)
-            // TODO: Support key_values
-            .build()
-    }
-
-    /// Benchmark for module path serialization overhead
-    #[test]
-    #[ignore]
-    fn module_serialize() {
-        bench_serialize(&module_record());
-    }
-
-    /// Benchmark for module path deserialization overhead
-    #[test]
-    #[ignore]
-    fn module_deserialize() {
-        bench_deserialize(&module_record());
-    }
-
-    /// Produce a log record with a big file path
-    fn file_record() -> log::Record<'static> {
-        log::Record::builder()
-            .args(format_args!(""))
-            .level(log::Level::Error)
-            .target(&"")
-            .module_path(None)
-            .file(Some(&long_string!()))
-            .line(None)
-            // TODO: Support key_values
-            .build()
-    }
-
-    /// Benchmark for file path serialization overhead
-    #[test]
-    #[ignore]
-    fn file_serialize() {
-        bench_serialize(&file_record());
-    }
-
-    /// Benchmark for file path deserialization overhead
-    #[test]
-    #[ignore]
-    fn file_deserialize() {
-        bench_deserialize(&file_record());
     }
 
     /// Generic microbenchmark for serialization overhead
