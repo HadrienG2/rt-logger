@@ -1,4 +1,4 @@
-/// Testing utilities needed by multiple modules of this crate
+//! Testing utilities needed by multiple modules of this crate
 
 use crate::serialization::Level;
 use quickcheck_derive::Arbitrary;

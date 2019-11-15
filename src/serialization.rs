@@ -364,103 +364,51 @@ mod tests {
 #[cfg(test)]
 mod benchmarks {
     use abomonation::align::AlignedBytes;
+    use crate::bench;
     use super::RecordWithoutArgs;
 
-    macro_rules! long_string {
-        () => {"This is a long string, you can use it to benchmark specific \
-               parts of the log record (de)serialization process. The string \
-               is long enough to offset the overhead of any other field of the \
-               log record. Sadly, we can't just use an &'static str because \
-               the std::fmt machinery truly, positively wants a string \
-               literal, but hopefully you won't mind this somewhat unorthodox \
-               use of macros, everything-looks-like-a-nail style... But \
-               now, seriously, if your logs are getting longer than this \
-               string, you may really want to consider shrinking them!"}
-    }
-
     const NUM_BENCH_ITERS: u32 = 50_000_000;
-
-    /// Produce a minimal log record for benchmarking fixed codec overheads
-    fn min_record() -> log::Record<'static> {
-        log::Record::builder()
-            .args(format_args!(""))
-            .level(log::Level::Error)
-            .target(&"")
-            .module_path(None)
-            .file(None)
-            .line(None)
-            // TODO: Support key_values
-            .build()
-    }
 
     /// Benchmark for minimal serialization overhead
     #[test]
     #[ignore]
     fn min_serialize() {
-        bench_serialize(&min_record());
+        bench_serialize(&bench::min_record());
     }
 
     /// Benchmark for minimal deserialization overhead
     #[test]
     #[ignore]
     fn min_deserialize() {
-        bench_deserialize(&min_record());
-    }
-
-    /// Produce a log record with big args for benchmarking fmt::Arguments
-    /// (de)serialization overhead
-    fn args_record() -> log::Record<'static> {
-        log::Record::builder()
-            .args(format_args!(long_string!()))
-            .level(log::Level::Error)
-            .target(&"")
-            .module_path(None)
-            .file(None)
-            .line(None)
-            // TODO: Support key_values
-            .build()
+        bench_deserialize(&bench::min_record());
     }
 
     /// Benchmark for args serialization overhead
     #[test]
     #[ignore]
     fn args_serialize() {
-        bench_serialize(&args_record());
+        bench_serialize(&bench::args_record());
     }
 
     /// Benchmark for args deserialization overhead
     #[test]
     #[ignore]
     fn args_deserialize() {
-        bench_deserialize(&args_record());
-    }
-
-    /// Produce a log record with a big target for benchmarking string
-    /// (de)serialization overhead
-    fn target_record() -> log::Record<'static> {
-        log::Record::builder()
-            .args(format_args!(""))
-            .level(log::Level::Error)
-            .target(&long_string!())
-            .module_path(None)
-            .file(None)
-            .line(None)
-            // TODO: Support key_values
-            .build()
+        bench_deserialize(&bench::args_record());
     }
 
     /// Benchmark for target serialization overhead
     #[test]
     #[ignore]
     fn target_serialize() {
-        bench_serialize(&target_record());
+        bench_serialize(&bench::target_record());
     }
 
     /// Benchmark for target deserialization overhead
     #[test]
     #[ignore]
     fn target_deserialize() {
-        bench_deserialize(&target_record());
+        bench_deserialize(&bench::target_record());
     }
 
     /// Generic microbenchmark for serialization overhead
@@ -487,17 +435,8 @@ mod benchmarks {
         // Benchmark log deserialization
         testbench::benchmark(NUM_BENCH_ITERS, || {
             unsafe {
-                super::decode_and_process_log(&mut bytes, ignore_log)
+                super::decode_and_process_log(&mut bytes, bench::ignore_log)
             }.unwrap();
         });
-    }
-
-    /// A non-optimizable ~no-op for log deserialization benchmarks
-    #[inline(never)]
-    fn ignore_log(record: &log::Record) {
-        // Even with inline(never), it's more prudent to do _something_ with the
-        // parameter, just to make sure the compiler doesn't add some sort of
-        // "does not make meaningful use of parameter" metadata to the function.
-        assert_eq!(record.level(), log::Level::Error);
     }
 }

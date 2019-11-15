@@ -1,5 +1,5 @@
-/// Facilities for transporting serialized `log::Record`s from real-time threads
-/// to a non-real-time logging thread.
+//! Facilities for transporting serialized `log::Record`s from real-time threads
+//! to a non-real-time logging thread.
 
 use crate::serialization;
 
@@ -21,7 +21,7 @@ use std::{
 //
 // FIXME: Remove hard limit on log size by allowing variable-sized log entries.
 //        But this will require a custom lock-free MPSC channel type...
-const LOG_STORAGE_BLOCK_SIZE: usize = 512;
+const LOG_STORAGE_BLOCK_SIZE: usize = 1024;
 
 /// Byte storage that's aligned on a `serialization::log_alignment()` boundary.
 ///
@@ -234,5 +234,98 @@ mod tests {
                            "Retrieved log::Record doesn't match")
             }).expect("Failed to retrieve log::Record");
         })
+    }
+}
+
+
+/// Performance benchmarks
+///
+/// These benchmarks masquerading as tests are a stopgap solution until
+/// benchmarking lands in Stable Rust. They should be compiled in release mode,
+/// and run with only one OS thread. In addition, the default behaviour of
+/// swallowing test output should obviously be suppressed.
+///
+/// TL;DR: cargo test --release -- --ignored --nocapture --test-threads=1
+///
+/// TODO: Switch to standard Rust benchmarks once they are stable
+///
+#[cfg(test)]
+mod benchmarks {
+    use crate::bench;
+    use super::LOG_STORAGE_BLOCK_SIZE;
+
+    // WARNING: Running these benchmarks with a high iteration count is highly
+    //          memory intensive, you may want to do stats on multiple runs.
+    const NUM_SEND_RECV_ITERS: u32 = 2_000_000;
+
+    /// Benchmark for minimal log emission overhead
+    #[test]
+    #[ignore]
+    fn min_send() {
+        bench_send(&bench::min_record());
+    }
+
+    /// Benchmark for minimal log reception overhead
+    #[test]
+    #[ignore]
+    fn min_recv() {
+        bench_recv(&bench::min_record());
+    }
+
+    /// Benchmark for args log emission overhead
+    #[test]
+    #[ignore]
+    fn args_send() {
+        bench_send(&bench::args_record());
+    }
+
+    /// Benchmark for args log reception overhead
+    #[test]
+    #[ignore]
+    fn args_recv() {
+        bench_recv(&bench::args_record());
+    }
+
+    /// Benchmark for target log emission overhead
+    #[test]
+    #[ignore]
+    fn target_send() {
+        bench_send(&bench::target_record());
+    }
+
+    /// Benchmark for target log reception overhead
+    #[test]
+    #[ignore]
+    fn target_recv() {
+        bench_recv(&bench::target_record());
+    }
+
+    /// Generic microbenchmark for log emission overhead
+    fn bench_send(record: &log::Record) {
+        // Prepare a channel for sending the logs
+        // FIXME: No implementation details, please
+        let capacity = LOG_STORAGE_BLOCK_SIZE * (NUM_SEND_RECV_ITERS as usize);
+        let (sender, _receiver) = super::log_channel(capacity);
+
+        // Benchmark log emission
+        testbench::benchmark(NUM_SEND_RECV_ITERS, || {
+            sender.try_send(record.clone()).unwrap();
+        });
+    }
+
+    /// Generic microbenchmark for log reception overhead
+    fn bench_recv(record: &log::Record) {
+        // Prepare a channel full of logs
+        // FIXME: No implementation details, please
+        let capacity = LOG_STORAGE_BLOCK_SIZE * (NUM_SEND_RECV_ITERS as usize);
+        let (sender, receiver) = super::log_channel(capacity);
+        for _ in 0..NUM_SEND_RECV_ITERS {
+            sender.try_send(record.clone()).unwrap();
+        }
+
+        // Benchmark log reception
+        testbench::benchmark(NUM_SEND_RECV_ITERS, || {
+            receiver.try_process(bench::ignore_log).unwrap();
+        });
     }
 }
