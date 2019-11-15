@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 abomonation = { path = "../abomonation" }
 abomonation_derive = { path = "../abomonation_derive" }
+crossbeam-channel = "0.4"
 log = "0.4"
 
 [dev-dependencies]

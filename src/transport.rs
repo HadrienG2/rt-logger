@@ -3,11 +3,12 @@
 
 use crate::serialization;
 
+use crossbeam_channel::{self, Receiver, Sender, TryRecvError, TrySendError};
+
 use std::{
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
     },
     num::NonZeroUsize,
 };
@@ -41,11 +42,10 @@ struct LogStorageBlock([u8; LOG_STORAGE_BLOCK_SIZE]);
 
 /// Mechanism to send logs to a logging thread
 //
-// TODO: Experiment with other channel impls: crossbeam, a custom impl with
-//       support for variable-size entries...
+// TODO: Try to make a channel which actually supports variable-sized logs...
 pub struct LogSender {
-    /// Bounded (FIXME: ...but not yet lock-free) channel for log storage blocks
-    sender: SyncSender<LogStorageBlock>,
+    /// Bounded lock-free channel for log storage blocks
+    sender: Sender<LogStorageBlock>,
 
     /// Counter of dropped log entries
     dropped: Arc<AtomicUsize>,
@@ -88,10 +88,9 @@ impl LogSender {
 
 /// Mechanism to process logs in a logging thread
 //
-// TODO: Experiment with other channel impls: crossbeam, a custom impl with
-//       support for variable-size entries...
+// TODO: Try to make a channel which actually supports variable-sized logs...
 pub struct LogReceiver {
-    /// Bounded (FIXME: ...but not yet lock-free) channel for log storage blocks
+    /// Bounded lock-free channel for log storage blocks
     receiver: Receiver<LogStorageBlock>,
 
     /// Counter of dropped log entries
@@ -115,8 +114,6 @@ impl LogReceiver {
     /// due to the weird semantics of `std::fmt::Arguments` the log cannot
     /// the function that deserialized it and must be processed in-place via a
     /// callback. Don't worry, we'll send you the result back.
-    //
-    // FIXME: Notify callback about dropped log entries as well
     pub fn try_process<R>(&self, callback: impl FnOnce(LogEvent) -> R)
                          -> Result<R, TryRecvError> {
         // Check for dropped logs
@@ -148,13 +145,7 @@ impl LogReceiver {
         }.expect("Failed to decode a serialized log").0)
     }
 
-    /// Check for log buffer overruns (logs dropped due to storage exhaustion)
-    ///
-    /// The logger thread should perform this check from time to time and log an
-    /// error when an overrun occurs.
-    ///
-    /// The log overrun counter will be reset when this function is called.
-    ///
+    /// Check for log buffer overruns and reset log overrun counter
     fn check_dropped_logs(&self) -> Option<NonZeroUsize> {
         // Avoid expensive atomic RMW operations unless necessary
         if self.dropped.load(Ordering::Relaxed) != 0 {
@@ -187,7 +178,7 @@ pub fn log_channel(capacity: usize) -> (LogSender, LogReceiver) {
         capacity / LOG_STORAGE_BLOCK_SIZE
         + if capacity % LOG_STORAGE_BLOCK_SIZE != 0 { 1 } else { 0 }; 
 
-    let (sender, receiver) = mpsc::sync_channel(num_blocks);
+    let (sender, receiver) = crossbeam_channel::bounded(num_blocks);
     let dropped = Arc::new(AtomicUsize::new(0));
 
     let log_sender = LogSender {
