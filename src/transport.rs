@@ -176,7 +176,13 @@ pub fn log_channel(capacity: usize) -> (LogSender, LogReceiver) {
 
 #[cfg(test)]
 mod tests {
-    use super::LogStorageBlock;
+    use crate::{
+        serialization,
+        tests::ArbitraryRecord,
+    };
+    use quickcheck_macros::quickcheck;
+    use std::num::NonZeroUsize;
+    use super::{LogStorageBlock, LOG_STORAGE_BLOCK_SIZE};
 
     #[test]
     fn storage_block_alignment() {
@@ -184,5 +190,49 @@ mod tests {
                    crate::serialization::log_alignment(),
                    "Log storage block alignment went out of sync with \
                     log serialization, please re-synchronize them");
+    }
+
+    #[quickcheck]
+    /// Check that we can go from log::Record to bytes and back
+    fn round_trip(record: ArbitraryRecord) {
+        // Make a log channel
+        // FIXME: Use a more realistic capacity
+        let (sender, receiver) = super::log_channel(1);
+
+        // Number of dropped logs should be initially zero
+        assert_eq!(receiver.check_dropped_logs(), NonZeroUsize::new(0),
+                   "A newly created channel should have no dropped log");
+
+        // Get a random log::Record
+        record.process(|record| {
+            // Ignore excessively large logs
+            if serialization::measure_log(&record) > LOG_STORAGE_BLOCK_SIZE {
+                return;
+            }
+
+            // Push the log through the channel
+            sender.try_send(record.clone())
+                  .expect("Failed to send a log::Record");
+            assert_eq!(receiver.check_dropped_logs(), NonZeroUsize::new(0),
+                       "A successful send should not count as a dropped log");
+
+            // Try to push another log. This should fail.
+            sender.try_send(record.clone())
+                  .expect_err("A log channel with a capacity of 1 should only \
+                               have room for one log record");
+            assert_eq!(receiver.check_dropped_logs(), NonZeroUsize::new(1),
+                       "A faild send should count as a dropped log");
+            assert_eq!(receiver.check_dropped_logs(), NonZeroUsize::new(0),
+                       "Checking the dropped log counter should reset it");
+
+            // Try to get it back...
+            receiver.try_process(|record2| {
+                // ...and check that the output log::Record is similar
+                // (our criteria being having the same Debug representation)
+                assert_eq!(format!("{:?}", record),
+                           format!("{:?}", record2),
+                           "Retrieved log::Record doesn't match")
+            }).expect("Failed to retrieve log::Record");
+        })
     }
 }

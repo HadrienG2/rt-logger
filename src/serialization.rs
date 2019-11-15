@@ -49,7 +49,7 @@ use std::{
 #[cfg_attr(test, derive(Arbitrary))]
 #[derive(Abomonation, Clone, Copy, Debug)]
 #[repr(usize)]
-enum Level {
+pub enum Level {
     Error,
     Warn,
     Info,
@@ -275,7 +275,7 @@ pub fn log_alignment() -> usize {
 #[cfg(test)]
 mod tests {
     use abomonation::align::AlignedBytes;
-    use quickcheck_derive::Arbitrary;
+    use crate::tests::ArbitraryRecord;
     use quickcheck_macros::quickcheck;
     use std::mem::size_of;
     use super::RecordWithoutArgs;
@@ -301,37 +301,6 @@ mod tests {
                        + if cfg!(target_pointer_width="128")  // __padding2: u64
                          { size_of::<u64>() } else { 0 }
                   );
-    }
-
-    /// quickcheck-friendly variant of log::Record
-    #[derive(Arbitrary, Clone, Debug)]
-    struct ArbitraryRecord {
-        message: String,
-        level: super::Level,
-        target: String,
-        module_path: Option<String>,
-        file: Option<String>,
-        line: Option<u32>
-    }
-
-    impl ArbitraryRecord {
-        /// Turn this into a log::Record, process it, and return the result
-        ///
-        /// We can't return the Record due to fmt::Arguments lifetime issues.
-        fn process<R>(self, action: impl FnOnce(log::Record) -> R) -> R {
-            action(
-                log::Record::builder()
-                    .args(format_args!("{}", self.message))
-                    .level(self.level.into())
-                    .target(&self.target)
-                    .module_path(self.module_path.as_ref().map(String::as_ref))
-                    .file(self.file.as_ref().map(String::as_ref))
-                    // Zero line numbers don't exist and we exploit this
-                    .line(self.line.filter(|&line| line != 0))
-                    // TODO: Support key_values
-                    .build()
-            )
-        }
     }
 
     #[quickcheck]
