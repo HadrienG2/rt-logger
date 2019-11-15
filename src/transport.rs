@@ -221,8 +221,8 @@ mod tests {
     /// Check that we can go from log::Record to bytes and back
     fn round_trip(record: ArbitraryRecord) {
         // Make a log channel
-        // FIXME: Use a more realistic capacity
-        let (sender, receiver) = super::log_channel(1);
+        // FIXME: No implementation details, please
+        let (sender, receiver) = super::log_channel(LOG_STORAGE_BLOCK_SIZE);
 
         // Number of dropped logs should be initially zero
         assert_eq!(receiver.check_dropped_logs(), NonZeroUsize::new(0),
@@ -391,8 +391,8 @@ mod benchmarks {
     /// realistic cache footprint as a point of comparison.
     fn bench_round_trip(record: &log::Record) {
         // Prepare a channel for holding the logs
-        // FIXME: Use a more realistic capacity
-        let (sender, receiver) = super::log_channel(1);
+        // FIXME: No implementation details, please
+        let (sender, receiver) = super::log_channel(LOG_STORAGE_BLOCK_SIZE);
 
         // Benchmark log emission+reception round-trip
         testbench::benchmark(NUM_ROUND_TRIP_ITERS, || {
