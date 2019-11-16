@@ -7,8 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-abomonation = { path = "../abomonation" }
-abomonation_derive = { path = "../abomonation_derive" }
+abomonation = { git = "https://github.com/HadrienG2/abomonation.git", branch = "alignment" }
+abomonation_derive = { git = "https://github.com/HadrienG2/abomonation_derive.git", branch = "next-abomonation" }
 crossbeam-channel = "0.4"
 log = "0.4"
 
